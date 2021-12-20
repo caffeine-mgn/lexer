@@ -11,7 +11,7 @@ on:
       machine:
         description: 'Machine to run on'     
         required: true
-          default: 'ubuntu-latest'
+        default: 'ubuntu-latest'
 
 jobs:
   publish:
