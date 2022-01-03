@@ -92,7 +92,7 @@ abstract class GenerateMain : DefaultTask() {
                 .append("\t\tfile.outputStream().bufferedWriter().use {\n")
             val extension = project.extensions.getByType(LexerExtension::class.java)
             extension.lexers.get().forEach { path ->
-                it.append("\t\t\tGenerator.generate(path = \"$path\", lexer = $path, appendable = it)\n")
+                it.append("\t\t\tGenerator.generate(path = \"$path\", lexer = $path, appendable = SourceAppender2(it))\n")
             }
             it.append("\t\t}\n")
                 .append("\t}\n")
