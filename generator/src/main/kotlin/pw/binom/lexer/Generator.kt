@@ -2,7 +2,7 @@ package pw.binom.lexer
 
 object Generator {
     fun generate(path: String, lexer: Lexer, appendable: SourceAppender) {
-        lexer.sort()
+        val rules = lexer.sortRooRules()
         val kg = KotlinGenerator(lexer, appendable)
         if (lexer.packageName.isNotEmpty()) {
             if (lexer.packageName.isBlank()) {
@@ -14,7 +14,7 @@ object Generator {
             throw IllegalArgumentException("Lexer $path has blank tokenTypeName property")
         }
         appendable.ln("@OptIn(ExperimentalStdlibApi::class)")
-            .ln("open class ${lexer.lexerClass}(val source: String) : Sequence<${lexer.lexerClass}.${lexer.tokenTypeName}> {") {
+            .ln("open class ${lexer.lexerClass}(val source: String) : Sequence<${lexer.lexerClass}.${lexer.tokenTypeName}?> {") {
                 ln("sealed interface SimpleToken : ${lexer.tokenTypeName} {") {}
                 ln("}")
 
@@ -37,11 +37,15 @@ object Generator {
             ln("val position: Int")
             ln("val column: Int")
             ln("val line: Int")
-            appendable.t("\n")
+            ln("object Exist:${lexer.tokenTypeName} {") {
+                ln("override val body get()=\"\"")
+                ln("override val position get()=0")
+                ln("override val column get()=0")
+                ln("override val line get()=0")
+            }.ln("}")
         }
-
         lexer.rules.forEach {
-            val value = it.second
+            val value = it.value
             kg.generateClass(rule = value, level = 2)
         }
         appendable.ln("\t}")
@@ -50,10 +54,16 @@ object Generator {
         appendable.ln("\tfun parse() = TokenIterator(source)")
         appendable.ln("\toverride fun iterator() = parse()")
         appendable.ln("")
-        appendable.ln("\tclass TokenIterator(val source: String) : Iterator<${lexer.tokenTypeName}> {") {
-            ln("private var position = 0")
-            ln("private var column = 0")
-            ln("private var line = 0")
+        appendable.ln("\tclass TokenIterator(val source: String) : Iterator<${lexer.tokenTypeName}?> {") {
+            ln("var position = 0"){
+                ln("private set")
+            }
+            ln("var column = 0"){
+                ln("private set")
+            }
+            ln("var line = 0"){
+                ln("private set")
+            }
             ln("private var value: String = \"\"")
             ln("private val stack = ArrayList<StackItem>()")
             lexer.inits.forEach {
@@ -62,24 +72,33 @@ object Generator {
         }
         appendable.pad(2).ln("private class StackItem(val position: Int, val column: Int, val line: Int)")
         appendable.padding(2) {
+            ln("private fun makeState() = StackItem(") {
+                ln("position = position,")
+                ln("column = column,")
+                ln("line = line,")
+            }.ln(")")
+            ln("private fun setState(state:StackItem) {") {
+                ln("position = state.position")
+                ln("column = state.column")
+                ln("line = state.line")
+            }.ln("}")
+            appendable.ln("private inline fun <T> r(state: StackItem, func: ()->Unit) : T?{"){
+                ln("setState(state)")
+                ln("func()")
+                ln("return null")
+            }.ln("}")
             ln("fun push() {") {
-                ln("stack += StackItem(") {
-                    ln("position = position,")
-                    ln("column = column,")
-                    ln("line = line,")
-                }
-                ln(")")
+                ln("stack += makeState()")
             }
         }.ln("}").ln("fun pop() : Boolean{") {
             ln("val item = stack.removeLastOrNull() ?: return false")
-            ln("position = item.position")
-            ln("column = item.column")
-            ln("line = item.line")
+            ln("setState(item)")
             ln("return true")
         }.ln("}").ln("fun skip() : Boolean{") {
             ln("stack.removeLastOrNull() ?: return false")
             ln("return true")
         }.ln("}")
+        kg.generateUtils()
 
 
         appendable.t("\t\toverride fun hasNext(): Boolean = position < source.length\n")
@@ -118,18 +137,18 @@ object Generator {
 
 
         lexer.rules.forEach {
-            val value = it.second
+            val value = it.value
             kg.generateRead(value, 2)
         }
 
-        appendable.ln("\t\toverride fun next(): ${lexer.tokenTypeName} {").ln("\t\t\tif (!hasNext()) {")
+        appendable.ln("\t\toverride fun next(): ${lexer.tokenTypeName}? {").ln("\t\t\tif (!hasNext()) {")
             .ln("\t\t\t\tthrow NoSuchElementException()").ln("\t\t\t}")
         if (lexer.rules.isEmpty()) {
             appendable.t("\t\t\treturn null\n")
         } else {
             appendable.t("\t\t\treturn ")
             var first = true
-            lexer.rules.forEach {
+            rules.forEach {
                 if (!first) {
                     appendable.t("\t\t\t\t?: ")
                 }
@@ -137,9 +156,9 @@ object Generator {
                 appendable.ln("read${it.first}()")
             }
             if (!first) {
-                appendable.t("\t\t\t\t?:")
+                appendable.t("\t\t\t\t")
             }
-            appendable.t(" TODO()\n")
+            appendable.ln("")
         }
         appendable.t("\t\t}\n")
         appendable.t("\t}\n")
@@ -147,16 +166,26 @@ object Generator {
 
         appendable.t("}\n")
         lexer.rules.forEach {
-            val value = it.second
+            val value = it.value
             when (value) {
                 is Rule.Regexp -> appendable.t(
-                    "private val __${it.first} = \"${
-                        value.regexp.replace("\\", "\\\\").replace("\"", "\\\"")
+                    "private val __${it.key} = \"${
+                        value.regexp
+                            .replace("\\", "\\\\")
+                            .replace("\"", "\\\"")
+                            .replace("\r", "\\r")
+                            .replace("\n", "\\n")
+                            .replace("\t", "\\t")
                     }\".toRegex()\n"
                 )
                 is Rule.StrExp -> appendable.t(
-                    "private const val __${it.first} = \"${
-                        value.string.replace("\\", "\\\\").replace("\"", "\\\"")
+                    "private const val __${it.key} = \"${
+                        value.string
+                            .replace("\\", "\\\\")
+                            .replace("\"", "\\\"")
+                            .replace("\r", "\\r")
+                            .replace("\n", "\\n")
+                            .replace("\t", "\\t")
                     }\"\n"
                 )
             }

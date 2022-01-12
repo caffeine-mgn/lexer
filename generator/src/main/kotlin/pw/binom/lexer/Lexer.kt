@@ -12,15 +12,27 @@ abstract class Lexer {
     open val tokenTypeName: String
         get() = "Token"
     internal val inits = ArrayList<String>()
-    internal val rules = ArrayList<Pair<String, Rule<out Rule<*>>>>()
-    private val order = ArrayList<Rule<out Rule<*>>>()
+    internal val rules = HashMap<String, Rule<out Rule<*>>>()
 
-    internal fun sort() {
-        val rules = rules.associate { it.second to it.first }
-        this.rules.clear()
-        order.forEach {
-            this.rules += rules[it]!! to it
+    private val order = ArrayList<Rule<out Rule<*>>>()
+    protected var rootRules: List<Rule<*>> = order
+
+    internal fun sortRooRules(): List<Pair<String, Rule<*>>> {
+
+        val rules = rules.entries.associate { it.value to it.key }
+        return rootRules.map {
+            rules[it]!! to it
         }
+
+        if (rootRules is List<Rule<*>>) {
+
+        }
+
+        val out = ArrayList<Pair<String, Rule<*>>>()
+        order.forEach {
+            out += rules[it]!! to it
+        }
+        return out
     }
 
     protected fun regexp(regexp: Regex) = regexp(regexp = regexp.pattern)
@@ -59,6 +71,8 @@ abstract class Lexer {
             r
         )
     }
+
+
 }
 
 operator fun Rule.Exp.invoke(func: () -> Expression) {
@@ -74,7 +88,7 @@ enum class ExpCount {
 
 fun <T : Rule<*>> T.named(name: String): Expression.Named = this.token.named(name)
 fun <T : Expression.Named> T.named(name: String) =
-    copy(name = name, count = if (count == ExpCount.ONE) ExpCount.OPTION else null) as Expression.Named
+    copy(name = name, count = count) as Expression.Named
 
 
 val Rule<*>.token: Expression.Named
@@ -87,29 +101,44 @@ sealed interface Rule<T> : ReadOnlyProperty<Lexer, Rule<T>> {
     var propertyName: String
     val preRead: ArrayList<String>
     val afterRead: ArrayList<String>
+    val extends: ArrayList<String>
+    val code: ArrayList<String>
 
     class Regexp internal constructor(val regexp: String) : Rule<Regexp> {
         override fun getValue(thisRef: Lexer, property: KProperty<*>) = this
         override lateinit var propertyName: String
-        override fun toString(): String = "Regexp($regexp)"
+        private val c = regexp
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\r", "\\r")
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+
+        override fun toString(): String = propertyName.ifEmpty { "Regexp(\"$c\")" }
         override val preRead = ArrayList<String>()
         override val afterRead = ArrayList<String>()
+        override val extends = ArrayList<String>()
+        override val code = ArrayList<String>()
     }
 
     class StrExp internal constructor(val string: String) : Rule<StrExp> {
         override lateinit var propertyName: String
         override val preRead = ArrayList<String>()
         override fun getValue(thisRef: Lexer, property: KProperty<*>) = this
-        override fun toString(): String = "StrExp($string)"
+        override fun toString(): String = propertyName.ifEmpty {"StrExp($string)"}
         override val afterRead = ArrayList<String>()
+        override val extends = ArrayList<String>()
+        override val code = ArrayList<String>()
     }
 
     class Exp internal constructor(val exp: Expression.Root) : Rule<Exp> {
         override lateinit var propertyName: String
         override val preRead = ArrayList<String>()
         override fun getValue(thisRef: Lexer, property: KProperty<*>) = this
-        override fun toString(): String = "Exp($exp)"
+        override fun toString(): String = propertyName.ifEmpty {"Exp($exp)"}
         override val afterRead = ArrayList<String>()
+        override val extends = ArrayList<String>()
+        override val code = ArrayList<String>()
     }
 }
 
@@ -136,7 +165,7 @@ class RuleProvider<T : Rule<T>>(val lexer: Lexer, val value: T) : PropertyDelega
         value.propertyName = property.name
         if (value is Rule.Exp) {
             value.exp.propertyName = property.name
-            lexer.rules.add(0, property.name to value)
+            lexer.rules[property.name] = value
         } else {
             lexer.rules += property.name to value
         }

@@ -1,101 +1,229 @@
 package pw.binom.lexer
 
 internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender) {
+    interface GeneratedExp {
+        val text: String
+
+        class Exp(override val text: String) : GeneratedExp
+        class CodeAndExp(val code: String, override val text: String) : GeneratedExp
+        companion object {
+            fun make(sb: StringBuilder, exp: String): GeneratedExp =
+                when {
+                    sb.isEmpty() -> Exp(exp)
+                    else -> CodeAndExp(code = sb.toString(), text = exp)
+                }
+        }
+    }
+
+    private fun <T : Appendable> T.apply(exp: GeneratedExp): T {
+        if (exp is GeneratedExp.CodeAndExp) {
+            appendLine(exp.code.trimEnd())
+        }
+        return this
+    }
 
     private var temparal = 0
-    fun generateReadExp2(value: Expression, vars: HashMap<Expression, String>, mainExp: Boolean = false): String {
-        val varName: String
-        val isNew: Boolean
-        val tt = vars[value]
-        if (tt != null) {
-            varName = tt
-            isNew = false
-        } else {
-            isNew = true
-            varName = vars[value] ?: (value.name ?: "t${++temparal}")
-        }
-        val prefix = if (isNew) {
-            "var "
-        } else {
-            ""
-        }
+    fun generateReadExp2(
+        value: Expression,
+        req: Set<Expression>,
+        vars: HashMap<Expression, String>,
+        mainExp: Boolean = false
+    ): GeneratedExp {
         if (!mainExp && value.propertyName != null) {
-            if (value.count == ExpCount.MANY) {
-                appendable.ln("$prefix$varName = readList{read${value.propertyName}()}")
-            } else {
-                appendable.ln("$prefix$varName = read${value.propertyName}()")
+            val sb = StringBuilder()
+            val exp = when {
+                value.count == ExpCount.MANY -> "readList{read${value.propertyName}()}"
+//                value in req -> "read${value.propertyName}()?:r(s0){return null}"
+                else -> "read${value.propertyName}()"
             }
-            vars[value] = varName
-            return varName
+            return if (value.name != null) {
+                sb.appendLine("${value.name} = $exp")
+                GeneratedExp.make(sb, value.name!!)
+            } else {
+//                val varName = "t${++temparal}"
+//                sb.append("val $varName = $exp")
+                GeneratedExp.make(sb, exp)
+            }
         }
         when (value) {
             is Expression.Token -> {
-                if (value.count == ExpCount.MANY) {
-//                    val tmpVarName = "t${++temparal}"
-                    appendable.ln("$prefix$varName = readList{read${value.rule.propertyName}()}")
-//                    appendable.ln("$prefix$varName = ArrayList<${value.rule.propertyName}>()")
-//                        .ln("while (true) {") {
-//                            ln("$varName += read${value.rule.propertyName}()?:break")
-//                        }.ln("}")
-                } else {
-                    appendable.ln("$prefix $varName = read${value.rule.propertyName}() //$value")
+                val sb = StringBuilder()
+                val exp = when {
+                    value.count == ExpCount.MANY -> "readList{read${value.rule.propertyName}()}"
+//                    value in req -> "read${value.rule.propertyName}()?:r(s0){return null}"
+                    else -> "read${value.rule.propertyName}()"
                 }
+                if (value.name != null) {
+                    sb.appendLine("${value.name} = $exp")
+                    return GeneratedExp.make(sb, value.name!!)
+                }
+//                val varName = "t${++temparal}"
+//                sb.append("val $varName = $exp")
+                return GeneratedExp.make(sb, exp)
             }
             is Expression.Or -> {
-                if (isNew) {
-                    appendable.ln("$prefix$varName: ${lexer.tokenTypeName}?")
+                val left = generateReadExp2(value.left, req = req, vars = vars)
+                val right = generateReadExp2(value.right, req = req, vars = vars)
+                val sb = StringBuilder()
+                sb.appendLine("or({ //left: ${value.left}")
+                sb.apply(left)
+                sb.append(left.text)
+                if (value.left.onGone != null) {
+                    sb.append(value.left.onGone)
                 }
-                val left = generateReadExp2(value.left, vars = vars)
-                appendable.ln("$varName=$left")
-                appendable.ln("if ($varName==null) {") {
-                    val right = generateReadExp2(value.right, vars = vars)
-                    ln("$varName=$right")
-                }.ln("}")
-//                appendable.ln("val $varName = xor($left, $right) //$value")
+                sb.appendLine("},{ //right: ${value.right}")
+                sb.apply(right)
+                sb.append(right.text)
+                if (value.right.onGone != null) {
+                    sb.append(value.right.onGone)
+                }
+                sb.append("})")
+                return GeneratedExp.Exp(sb.toString())
+
+
+                val varName = "t${++temparal}"
+
+                val funcName = "or${++temparal}"
+                sb.append("fun $funcName():Any?{")
+                sb.apply(left)
+                sb.appendLine("val l = ${left.text}")
+                sb.appendLine("if (l!=null){return l}")
+                sb.apply(right)
+                sb.appendLine("return ${right.text}")
+                sb.appendLine("}")
+                return GeneratedExp.make(sb, "$funcName()")
+
+                if (left is GeneratedExp.CodeAndExp) {
+                    sb.appendLine(left.code)
+                }
+                sb.appendLine("var $varName : Any? = ${left.text}")
+                    .appendLine("if ($varName==null){")
+                if (right is GeneratedExp.CodeAndExp) {
+                    sb.appendLine(right.code)
+                }
+                sb.appendLine("$varName = ${right.text}")
+                sb.appendLine("}")
+                return GeneratedExp.make(sb, varName)
             }
             is Expression.And -> {
-                appendable.ln("push()")
-                if (isNew) {
-                    appendable.ln("$prefix$varName:${lexer.tokenTypeName}? = null")
-                }
-                val left = generateReadExp2(value.left, vars = vars)
-                if (value.left.count != ExpCount.OPTION) {
-                    appendable.ln("if ($left!=null) {") {
-                        val right = generateReadExp2(value.right, vars = vars)
-                        ln("$varName=$right")
-                    }.ln("}")
+                val left = generateReadExp2(value.left, req = req, vars = vars)
+                val right = generateReadExp2(value.right, req = req, vars = vars)
+                val sb = StringBuilder()
+                sb.appendLine("and({ //left: ${value.left}")
+                sb.apply(left)
+                sb.append(left.text)
+                if (value.left.onGone != null) {
+                    sb.append(value.left.onGone)
                 } else {
-                    appendable.ln("$varName=$left")
-                    val right = generateReadExp2(value.right, vars = vars)
-                    appendable.ln("$varName=$right")
+                    if (value.left.count == ExpCount.OPTION) {
+                        sb.append("?:${lexer.tokenTypeName}.Exist")
+                    }
                 }
-                appendable.ln("if ($varName == null) pop() else skip()")
+                sb.appendLine("},{ //right: ${value.right}")
+                sb.apply(right)
+                sb.append(right.text)
+                if (value.right.onGone != null) {
+                    sb.append(value.right.onGone)
+                } else {
+                    if (value.right.count == ExpCount.OPTION) {
+                        sb.append("?:${lexer.tokenTypeName}.Exist")
+                    }
+                }
+                sb.append("})")
+                return GeneratedExp.Exp(sb.toString())
+
+
+                val funcName = "and${++temparal}"
+                sb.append("fun $funcName():Any?{")
+                sb.appendLine("val s1 = makeState()")
+                sb.apply(left)
+                sb.append("val l = ${left.text}")
+                if (value.left.count != ExpCount.OPTION) {
+                    sb.append("?:return null")
+                }
+                sb.appendLine()
+                sb.apply(right)
+                sb.append("val r = ${right.text}")
+                if (value.right.count != ExpCount.OPTION) {
+                    sb.append("?:r(s1){return null}")
+                }
+                sb.appendLine()
+                sb.appendLine("return l?:r")
+                sb.appendLine("}")
+                return GeneratedExp.make(sb, "$funcName()")
+
+
+                sb.apply(left)
+                sb.appendLine(left.text)
+                sb.apply(right)
+                val varName = "t${++temparal}"
+                sb.appendLine("val $varName=${right.text}?:${left.text}")
+                val e = if (value.count != ExpCount.OPTION) {
+                    "?:r(s0){return null}"
+                } else ""
+                return GeneratedExp.make(sb, varName + e)
+
+
+                sb.apply(left)
+                if (value.left in req) {
+                    if (value.left.name != null) {
+                        sb.append("${value.left.name}=")
+                    }
+                    sb.appendLine("${left.text}?:r(s0){return null}")
+                    if (value.right in req) {
+                        sb.apply(right)
+                        if (value.right.name != null) {
+                            sb.append("${value.right.name}=")
+                        }
+                        sb.appendLine("${right.text}?:r(s0){return null}")
+                        sb.append("//---------------4")
+                        return GeneratedExp.make(sb, "${lexer.tokenTypeName}.Exist")
+                    } else {
+                        sb.apply(right)
+                        if (value.right.name != null) {
+                            sb.append("${value.right.name}=")
+                        }
+                        sb.appendLine(right.text)
+                        sb.append("//---------------3")
+                        return GeneratedExp.make(sb, "${left.text}?:${right.text}")
+                    }
+                } else {
+                    sb.appendLine(left.text)
+                    if (value.right in req) {
+                        sb.apply(right)
+                        if (value.right.name != null) {
+                            sb.append("${value.right.name}=${right.text}")
+                        }
+                        sb.appendLine("${right.text}?:r(s0){return null}")
+                        sb.append("//---------------2")
+                        return GeneratedExp.make(sb, right.text)
+                    } else {
+                        sb.apply(right)
+                        sb.appendLine(right.text)
+                        sb.append("//---------------1")
+                        return GeneratedExp.make(sb, "${left.text}?:${right.text}")
+                    }
+                }
             }
-            is Expression.Root -> generateReadExp2(value = value.exp, mainExp = true, vars = vars)
+            is Expression.Root -> return generateReadExp2(value = value.exp, req = req, mainExp = false, vars = vars)
             else -> TODO()
         }
-//        if (value.count == ExpCount.ONE) {
-//            appendable.ln("if ($varName == null) return null")
-//        }
-        vars[value] = varName
-        return varName
+        TODO()
     }
 
     fun generateReadExp3(value: Expression.Root, afterRead: List<String>) {
         appendable
-            .ln("push()")
-            .ln("val position = position")
-            .ln("val column = column")
-            .ln("val line = line")
+            .ln("val s0 = makeState()")
         val vars = HashMap<Expression, String>()
         val named = value.getNamed(excludeRoots = true)
 
         val nonOptionals = HashSet<Expression>()
         nonOptionals += value.exp
         nonOptionals += value.getNamed(excludeRoots = true)
-//        value.exp.forEachNonOptional(excludeRoots = true) {
-//            nonOptionals += it
-//        }
+        val nonOptionals2 = HashSet<Expression>()
+        value.exp.forEachNonOptional(excludeRoots = true) {
+            nonOptionals2 += it
+        }
         nonOptionals.forEach {
             val name = it.name ?: "t${++temparal}"
             val baseType =
@@ -105,49 +233,34 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                 ExpCount.OPTION -> appendable.ln("var $name:$baseType? = null")
                 ExpCount.MANY -> appendable.ln("var $name:List<$baseType>? = null")
             }
-
-//            appendable.ln("var $name:$type?=null")
             vars[it] = name
         }
-        val expRoot = generateReadExp2(value.exp, mainExp = true, vars = vars)
-        appendable.ln("if ($expRoot==null){") {
-            ln("pop()")
-            ln("return null")
-        }.ln("}")
-//        if (nonOptionals.isNotEmpty()) {
-//            appendable.ln("if (${nonOptionals.joinToString(separator = "||") { vars[it]!! + "==null" }}){") {
-//                ln("pop()")
-//                ln("return null")
-//            }.ln("}")
-//        }
+        val expRoot = generateReadExp2(value.exp, mainExp = false, vars = vars, req = nonOptionals2)
+        if (expRoot is GeneratedExp.CodeAndExp) {
+            appendable.ln(expRoot.code)
+        }
+        if (value.exp.onGone != null) {
+            appendable.ln("${expRoot.text}${value.exp.onGone}?:r(s0){return null}")
+        } else {
+            appendable.ln("${expRoot.text}?:r(s0){return null}")
+        }
+//        appendable.ln("if (${expRoot.text} == null) {") {
+//            ln("setState(s0)")
+//            ln("return null")
+//        }.ln("}")
 
-//        nonOptionals.forEach {
-//            val varName = vars[it]!!
-//            appendable.ln("if ($varName == null) {pop();return null;}")
-//        }
-
-//        named.forEach {
-//            appendable.ln("//${it.name} = $it")
-//        }
-//        named.forEach {
-//            if (it.count != ExpCount.OPTION) {
-//                appendable.ln("if (${it.name} == null) {pop();return null}")
-//            }
-//        }
-
-        appendable
-            .ln("skip()")
         afterRead.forEach {
             appendable.t(it)
         }
         appendable.ln("return ${lexer.tokenTypeName}.${value.propertyName}(") {
-            ln("position = position,")
-            ln("column = column,")
-            ln("line = line,")
-            ln("length = this.position - position,")
+            ln("position = s0.position,")
+            ln("column = s0.column,")
+            ln("line = s0.line,")
+            ln("length = this.position - s0.position,")
             ln("source = source,")
             named.forEach {
-                ln("${it.name} = ${it.name},")
+                val e = if (it in nonOptionals2) "" else ""
+                ln("${it.name} = ${it.name}$e,")
             }
         }
         appendable.ln(")")
@@ -158,7 +271,7 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
 
         appendable
             .padding(level) {
-                ln("private fun read${value.propertyName}():${lexer.tokenTypeName}.${value.propertyName}? {")
+                ln("fun read${value.propertyName}():${lexer.tokenTypeName}.${value.propertyName}? {")
                 value.preRead.forEach {
                     appendable.t(it)
                 }
@@ -172,7 +285,7 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
         when (value) {
             is Rule.Regexp -> appendable
                 .padding(level) {
-                    ln("private fun read${value.propertyName}():${lexer.tokenTypeName}.${value.propertyName}? {") {
+                    ln("fun read${value.propertyName}():${lexer.tokenTypeName}.${value.propertyName}? {") {
                         value.preRead.forEach {
                             appendable.t(it)
                         }
@@ -188,7 +301,7 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                 }
             is Rule.StrExp -> appendable
                 .padding(level) {
-                    ln("private fun read${value.propertyName}():${lexer.tokenTypeName}.${value.propertyName}? {") {
+                    ln("fun read${value.propertyName}():${lexer.tokenTypeName}.${value.propertyName}? {") {
                         value.preRead.forEach {
                             appendable.t(it)
                         }
@@ -211,7 +324,24 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
         }
     }
 
+    fun generateUtils() {
+        appendable.ln("private inline fun and(l: () -> Any?, r: () -> Any?): Any? {") {
+            ln("val m = makeState()")
+            ln("val left = l()")
+            ln("if (left != null) {") {
+                ln("if (r() == null) {") {
+                    ln("setState(m)")
+                    ln("return null")
+                }.ln("}")
+                ln("return Token.Exist")
+            }.ln("}")
+            ln("return null")
+        }.ln("}")
+        appendable.ln("private inline fun or(l: () -> Any?, r: () -> Any?): Any? = l() ?: r()")
+    }
+
     fun generateClass(rule: Rule<*>, level: Int = 0) {
+        val extends = rule.extends.joinToString(separator = ", ").let { if (it.isNotEmpty()) ",$it" else it }
         when (rule) {
             is Rule.Regexp -> appendable.padding(level) {
                 ln("class ${rule.propertyName}(") {
@@ -220,8 +350,11 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                     ln("override val line: Int,")
                     ln("override val body: String,")
                 }
-                ln(") : ${lexer.tokenTypeName}, RegexpToken {") {
+                ln(") : ${lexer.tokenTypeName}, RegexpToken$extends {") {
                     ln("override val regexp get() = __${rule.propertyName}")
+                    rule.code.forEach {
+                        ln(it.trimEnd())
+                    }
                 }
                 ln("}")
             }
@@ -231,15 +364,24 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                     ln("override val column: Int,")
                     ln("override val line: Int,")
                 }
-                ln(") : ${lexer.tokenTypeName}, StringToken {") {
+                ln(") : ${lexer.tokenTypeName}, StringToken$extends {") {
                     ln("override val string get() = __${rule.propertyName}")
                     ln("override val body get() = __${rule.propertyName}")
                     ln("override val length get() = ${rule.string.length}")
+                    rule.code.forEach {
+                        ln(it.trimEnd())
+                    }
                 }
                 ln("}")
             }
             is Rule.Exp -> {
                 val named = rule.exp.getNamed(excludeRoots = true)
+
+                val nonOptionals2 = HashSet<Expression>()
+                rule.exp.forEachNonOptional(excludeRoots = true) {
+                    nonOptionals2 += it
+                }
+
                 appendable.padding(level) {
                     ln("class ${rule.propertyName}(") {
                         ln("override val position: Int,")
@@ -249,15 +391,22 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                         ln("private val source: String,")
 
                         named.forEach {
-                            val text = when (it.count) {
-                                ExpCount.MANY -> "List<${it.propertyName ?: lexer.tokenTypeName}>"
-                                ExpCount.OPTION -> "${it.propertyName ?: lexer.tokenTypeName}?"
-                                ExpCount.ONE -> it.propertyName ?: lexer.tokenTypeName
+                            val e = if (it in nonOptionals2) {
+                                ""
+                            } else {
+                                "?"
                             }
-                            ln("val ${it.name}: $text,")
+                            val text = when {
+                                it.count == ExpCount.MANY -> "List<${it.propertyName ?: lexer.tokenTypeName}>"
+                                else -> it.propertyName ?: lexer.tokenTypeName
+                            }
+                            ln("val ${it.name}: $text$e,")
                         }
-                    }.ln(") : ${lexer.tokenTypeName} {") {
+                    }.ln(") : ${lexer.tokenTypeName}$extends {") {
                         ln("override val body get() = source.substring(position, position + length)")
+                        rule.code.forEach {
+                            ln(it.trimEnd())
+                        }
                     }.ln("}")
                 }
             }

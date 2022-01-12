@@ -6,7 +6,9 @@ sealed interface Expression {
     var root: Boolean
     var count: ExpCount
     var propertyName: String?
-    fun copy(name: String? = null, count: ExpCount? = null): Expression
+    var onGone: String?
+    fun copy(name: String? = null, count: ExpCount? = null, throwOnGone: String? = null): Expression
+
     interface Named : Expression
     class Root(private var body: () -> Expression, private var body2: Expression?) : Expression, Named {
         override var name: String? = null
@@ -14,6 +16,8 @@ sealed interface Expression {
         override var root: Boolean = true
         override var count: ExpCount = ExpCount.ONE
         override var propertyName: String? = null
+        override var onGone: String? = null
+        override fun toString(): String = propertyName?:exp.toString()
         fun reset(f: () -> Expression) {
             body = f
             body2 = null
@@ -27,7 +31,7 @@ sealed interface Expression {
                 return body2!!
             }
 
-        override fun copy(name: String?, count: ExpCount?): Expression =
+        override fun copy(name: String?, count: ExpCount?, throwOnGone: String?): Expression =
             Root(
                 body = body,
                 body2 = body2,
@@ -37,6 +41,7 @@ sealed interface Expression {
                 it.root = root
                 it.count = count ?: this.count
                 it.propertyName = propertyName
+                it.onGone=throwOnGone?:this.onGone
             }
 
     }
@@ -44,17 +49,7 @@ sealed interface Expression {
     sealed interface Two : Expression {
         val left: Expression
         val right: Expression
-        override fun copy(name: String?, count: ExpCount?) =
-            And(
-                left = left,
-                right = right,
-            ).also {
-                it.name = name ?: this.name
-                it.parent = parent
-                it.root = root
-                it.count = count ?: this.count
-                it.propertyName = propertyName
-            }
+
     }
 
     class Token(val rule: Rule<*>) : Expression, Named {
@@ -63,8 +58,9 @@ sealed interface Expression {
         override var root: Boolean = false
         override var count: ExpCount = ExpCount.ONE
         override var propertyName: String? = null
+        override var onGone: String? = null
         override fun toString(): String = rule.toString()
-        override fun copy(name: String?, count: ExpCount?) =
+        override fun copy(name: String?, count: ExpCount?, throwOnGone: String?) =
             Token(
                 rule = rule
             ).also {
@@ -73,6 +69,7 @@ sealed interface Expression {
                 it.root = root
                 it.count = count ?: this.count
                 it.propertyName = propertyName
+                it.onGone=throwOnGone?:this.onGone
             }
     }
 
@@ -82,7 +79,21 @@ sealed interface Expression {
         override var root: Boolean = false
         override var count: ExpCount = ExpCount.ONE
         override var propertyName: String? = null
-        override fun toString(): String = "$left and $right"
+        override var onGone: String? = null
+        override fun toString(): String = "($left and $right)"
+
+        override fun copy(name: String?, count: ExpCount?, throwOnGone: String?) =
+            And(
+                left = left,
+                right = right,
+            ).also {
+                it.name = name ?: this.name
+                it.parent = parent
+                it.root = root
+                it.count = count ?: this.count
+                it.propertyName = propertyName
+                it.onGone=throwOnGone?:this.onGone
+            }
     }
 
     class Or(override val left: Expression, override val right: Expression) : Expression, Two {
@@ -91,6 +102,20 @@ sealed interface Expression {
         override var root: Boolean = false
         override var count: ExpCount = ExpCount.ONE
         override var propertyName: String? = null
-        override fun toString(): String = "$left or $right"
+        override var onGone: String? = null
+        override fun toString(): String = "($left or $right)"
+
+        override fun copy(name: String?, count: ExpCount?, onGone: String?) =
+            Or(
+                left = left,
+                right = right,
+            ).also {
+                it.name = name ?: this.name
+                it.parent = parent
+                it.root = root
+                it.count = count ?: this.count
+                it.propertyName = propertyName
+                it.onGone=onGone?:this.onGone
+            }
     }
 }

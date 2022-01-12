@@ -31,9 +31,6 @@ internal fun Expression.forEachNonOptional(excludeRoots: Boolean, func: (Express
 
         func(e)
         viseted += e
-//        if (excludeRoots && e.propertyName != null) {
-//            return
-//        }
         when (e) {
             is Expression.Two -> {
                 r(e.left)
@@ -77,11 +74,24 @@ operator fun Expression.plus(token: Rule<*>): Expression.And =
 
 operator fun Rule<*>.plus(token: Rule<*>): Expression = this.token + token.token
 
+fun <T : Expression> T.onGone(exception: String): T = copy(throwOnGone = exception) as T
+fun Rule<*>.onGone(exception: String) = token.onGone(exception)
+
 val Rule<*>.optional
     get() = this.token.optional as Expression.Named
 
 val Rule<*>.many
     get() = this.token.copy(count = ExpCount.MANY) as Expression.Named
+
+fun <T : RuleProvider<out Rule<*>>> T.extends(interfaceName: String): T {
+    this.value.extends += interfaceName
+    return this
+}
+
+fun <T : RuleProvider<out Rule<*>>> T.code(codeBlock: String): T {
+    this.value.code += codeBlock
+    return this
+}
 
 val <T : Expression>T.optional
     get() = copy(count = ExpCount.OPTION)
