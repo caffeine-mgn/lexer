@@ -1,4 +1,4 @@
 rootProject.name = "lexer"
 
 include(":generator")
-include(":plugin")
+include(":gradle-plugin")

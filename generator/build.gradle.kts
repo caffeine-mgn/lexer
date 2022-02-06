@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm")
+    `maven-publish`
 }
 apply<pw.binom.plugins.BinomPublishPlugin>()
 dependencies {
@@ -7,7 +8,7 @@ dependencies {
     testApi(kotlin("test"))
 }
 
-tasks{
+tasks {
     withType(Test::class) {
         useJUnitPlatform()
         testLogging.showStandardStreams = true
@@ -19,3 +20,14 @@ tasks{
 }
 
 apply<pw.binom.plugins.DocsPlugin>()
+
+publishing {
+    publications {
+        create<MavenPublication>("BinomRepository") {
+            groupId = project.group.toString()
+            artifactId = project.name
+            version = project.version.toString()
+            from(components["java"])
+        }
+    }
+}

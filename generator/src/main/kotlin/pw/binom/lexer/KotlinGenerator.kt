@@ -1,6 +1,7 @@
 package pw.binom.lexer
 
 internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender) {
+    private var TOKEN_ID_GENERATOR = 1
     interface GeneratedExp {
         val text: String
 
@@ -80,7 +81,6 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                 sb.append("})")
                 return GeneratedExp.Exp(sb.toString())
 
-
                 val varName = "t${++temparal}"
 
                 val funcName = "or${++temparal}"
@@ -132,7 +132,6 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                 sb.append("})")
                 return GeneratedExp.Exp(sb.toString())
 
-
                 val funcName = "and${++temparal}"
                 sb.append("fun $funcName():Any?{")
                 sb.appendLine("val s1 = makeState()")
@@ -152,7 +151,6 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                 sb.appendLine("}")
                 return GeneratedExp.make(sb, "$funcName()")
 
-
                 sb.apply(left)
                 sb.appendLine(left.text)
                 sb.apply(right)
@@ -162,7 +160,6 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                     "?:r(s0){return null}"
                 } else ""
                 return GeneratedExp.make(sb, varName + e)
-
 
                 sb.apply(left)
                 if (value.left in req) {
@@ -283,43 +280,45 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
 
     fun generateRead(value: Rule<*>, level: Int = 0) {
         when (value) {
-            is Rule.Regexp -> appendable
-                .padding(level) {
-                    ln("fun read${value.propertyName}():${lexer.tokenTypeName}.${value.propertyName}? {") {
-                        value.preRead.forEach {
-                            appendable.t(it)
-                        }
-                        ln("val result = __${value.propertyName}.matchAt(source, position)?:return null")
-                        ln("val ret = ${lexer.tokenTypeName}.${value.propertyName}(position = position, column = column, line = line, body = result.value)")
-                        ln("move(result.value)")
-                        value.afterRead.forEach {
-                            appendable.t(it)
-                        }
-                        ln("return ret")
-                    }
-                    ln("}")
-                }
-            is Rule.StrExp -> appendable
-                .padding(level) {
-                    ln("fun read${value.propertyName}():${lexer.tokenTypeName}.${value.propertyName}? {") {
-                        value.preRead.forEach {
-                            appendable.t(it)
-                        }
-                        ln("return if (assertString(__${value.propertyName})) {") {
-                            ln("val ret = ${lexer.tokenTypeName}.${value.propertyName}(position = position, column = column, line = line)")
-                            ln("move(__${value.propertyName})")
+            is Rule.Regexp ->
+                appendable
+                    .padding(level) {
+                        ln("fun read${value.propertyName}():${lexer.tokenTypeName}.${value.propertyName}? {") {
+                            value.preRead.forEach {
+                                appendable.t(it)
+                            }
+                            ln("val result = __${value.propertyName}.matchAt(source, position)?:return null")
+                            ln("val ret = ${lexer.tokenTypeName}.${value.propertyName}(position = position, column = column, line = line, body = result.value)")
+                            ln("move(result.value)")
                             value.afterRead.forEach {
                                 appendable.t(it)
                             }
-                            ln("ret")
-                        }
-                        ln("} else {") {
-                            ln("null")
+                            ln("return ret")
                         }
                         ln("}")
                     }
-                    ln("}")
-                }
+            is Rule.StrExp ->
+                appendable
+                    .padding(level) {
+                        ln("fun read${value.propertyName}():${lexer.tokenTypeName}.${value.propertyName}? {") {
+                            value.preRead.forEach {
+                                appendable.t(it)
+                            }
+                            ln("return if (assertString(__${value.propertyName})) {") {
+                                ln("val ret = ${lexer.tokenTypeName}.${value.propertyName}(position = position, column = column, line = line)")
+                                ln("move(__${value.propertyName})")
+                                value.afterRead.forEach {
+                                    appendable.t(it)
+                                }
+                                ln("ret")
+                            }
+                            ln("} else {") {
+                                ln("null")
+                            }
+                            ln("}")
+                        }
+                        ln("}")
+                    }
             is Rule.Exp -> generateReadExp(level = level, value = value)
         }
     }
@@ -351,7 +350,11 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                     ln("override val body: String,")
                 }
                 ln(") : ${lexer.tokenTypeName}, RegexpToken$extends {") {
+                    ln("companion object {") {
+                        ln("const val ID = ${TOKEN_ID_GENERATOR++}")
+                    }.ln("}")
                     ln("override val regexp get() = __${rule.propertyName}")
+                    ln("override val id get() = ID")
                     rule.code.forEach {
                         ln(it.trimEnd())
                     }
@@ -365,9 +368,13 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                     ln("override val line: Int,")
                 }
                 ln(") : ${lexer.tokenTypeName}, StringToken$extends {") {
+                    ln("companion object {") {
+                        ln("const val ID = ${TOKEN_ID_GENERATOR++}")
+                    }.ln("}")
                     ln("override val string get() = __${rule.propertyName}")
                     ln("override val body get() = __${rule.propertyName}")
                     ln("override val length get() = ${rule.string.length}")
+                    ln("override val id get() = ID")
                     rule.code.forEach {
                         ln(it.trimEnd())
                     }
@@ -403,7 +410,11 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
                             ln("val ${it.name}: $text$e,")
                         }
                     }.ln(") : ${lexer.tokenTypeName}$extends {") {
+                        ln("companion object {") {
+                            ln("const val ID = ${TOKEN_ID_GENERATOR++}")
+                        }.ln("}")
                         ln("override val body get() = source.substring(position, position + length)")
+                        ln("override val id get() = ID")
                         rule.code.forEach {
                             ln(it.trimEnd())
                         }
@@ -414,6 +425,5 @@ internal class KotlinGenerator(val lexer: Lexer, val appendable: SourceAppender)
     }
 
     fun generate() {
-
     }
 }

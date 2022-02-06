@@ -2,6 +2,7 @@ plugins {
     kotlin("jvm")
     `java-gradle-plugin`
 }
+
 apply<pw.binom.plugins.BinomPublishPlugin>()
 kotlin.sourceSets["main"].kotlin.srcDir(project.buildDir.resolve("gen"))
 dependencies {
@@ -22,7 +23,9 @@ tasks {
         versionSource.writeText(
             """package pw.binom.lexer
             
-const val LEXER_VERSION = "${project.version}""""
+const val LEXER_VERSION = "${project.version}"
+const val LEXER_GROUP = "${project.group}"
+"""
         )
     }
     compileKotlin.dependsOn(generateVersion)

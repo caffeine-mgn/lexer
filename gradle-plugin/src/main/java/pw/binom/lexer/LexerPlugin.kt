@@ -30,7 +30,7 @@ open class LexerPlugin : Plugin<Project> {
                 config.dependencies.add(target.dependencies.create("org.jetbrains.kotlin:kotlin-stdlib:${KotlinVersion.CURRENT}"))
 //                config.dependencies.add(target.dependencies.create("pw.binom.static-css:generator:0.1.30"))
 //                config.dependencies.add(target.dependencies.create("pw.binom.lexer:generator:0.1.30"))
-                target.dependencies.add("api", target.dependencies.create("pw.binom.lexer:generator:${LEXER_VERSION}"))
+                target.dependencies.add("api", target.dependencies.create("$LEXER_GROUP:generator:$LEXER_VERSION"))
                 target.gradle.removeListener(this)
             }
 
